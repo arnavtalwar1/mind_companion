@@ -30,7 +30,7 @@ class MentalHealthDB:
         # Sessions table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 session_type TEXT NOT NULL,
                 start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -47,7 +47,7 @@ class MentalHealthDB:
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
-                session_id INTEGER,
+                session_id TEXT,
                 message_text TEXT NOT NULL,
                 sender TEXT NOT NULL,
                 emotion_detected TEXT,
@@ -66,7 +66,7 @@ class MentalHealthDB:
                 intensity REAL NOT NULL,
                 source TEXT NOT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                session_id INTEGER,
+                session_id TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id),
                 FOREIGN KEY (session_id) REFERENCES sessions (id)
             )
@@ -102,7 +102,7 @@ class MentalHealthDB:
         
         conn.commit()
         conn.close()
-        print("✅ Database initialized successfully!")
+        print("Database initialized successfully!")
     
     def add_user(self, user_data):
         """Add a new user to the database"""
@@ -150,17 +150,22 @@ class MentalHealthDB:
             }
         return None
     
-    def start_session(self, user_id, session_type='chat'):
+    def start_session(self, user_id, session_id, session_type='chat'):
         """Start a new therapy session"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Check if session already exists
+        cursor.execute('SELECT id FROM sessions WHERE id = ?', (session_id,))
+        if cursor.fetchone():
+            conn.close()
+            return session_id
+            
         cursor.execute('''
-            INSERT INTO sessions (user_id, session_type)
-            VALUES (?, ?)
-        ''', (user_id, session_type))
+            INSERT INTO sessions (id, user_id, session_type)
+            VALUES (?, ?, ?)
+        ''', (session_id, user_id, session_type))
         
-        session_id = cursor.lastrowid
         conn.commit()
         conn.close()
         

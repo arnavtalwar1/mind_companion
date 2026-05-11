@@ -6,29 +6,36 @@ class APIService {
     constructor() {
         this.client = axios.create({
             baseURL: API_BASE_URL,
-            timeout: 5000,
+            timeout: 10000, // Increased timeout
             headers: {
                 'Content-Type': 'application/json',
             }
         });
         
-        // Session management
+        // Enhanced session management
         this.currentSessionId = null;
         this.conversationHistory = [];
+        this.userContext = {
+            moodPatterns: [],
+            recurringIssues: [],
+            preferredExercises: [],
+            riskLevel: 'low'
+        };
         
-        this.client.interceptors.response.use(
-            (response) => response,
-            (error) => {
-                console.log('API Error, using fallback responses:', error.message);
-                return Promise.resolve({ data: this.getFallbackResponse(error.config) });
-            }
-        );
+        // Removed aggressive fallback interceptor so real errors are thrown
     }
 
-    // Session management methods
+    // Enhanced session management
     startNewSession(userId) {
         this.currentSessionId = `session_${Date.now()}_${userId}`;
         this.conversationHistory = [];
+        this.userContext = {
+            moodPatterns: [],
+            recurringIssues: [],
+            preferredExercises: [],
+            riskLevel: 'low',
+            lastMoodCheck: new Date().toISOString()
+        };
         return this.currentSessionId;
     }
 
@@ -36,45 +43,131 @@ class APIService {
         return this.currentSessionId;
     }
 
-    addToHistory(message, sender, emotion = null) {
-        this.conversationHistory.push({
+    addToHistory(message, sender, emotion = null, metadata = {}) {
+        const historyEntry = {
             message,
             sender,
             emotion,
-            timestamp: new Date().toISOString()
-        });
+            timestamp: new Date().toISOString(),
+            metadata
+        };
         
-        // Keep only last 50 messages to prevent memory issues
-        if (this.conversationHistory.length > 50) {
-            this.conversationHistory = this.conversationHistory.slice(-50);
+        this.conversationHistory.push(historyEntry);
+        
+        // Update user context based on conversation
+        if (sender === 'user') {
+            this.updateUserContext(message, emotion, metadata);
+        }
+        
+        // Keep only last 30 messages for better context management
+        if (this.conversationHistory.length > 30) {
+            this.conversationHistory = this.conversationHistory.slice(-30);
         }
     }
 
-    getConversationHistory() {
-        return this.conversationHistory;
+    updateUserContext(message, emotion, metadata) {
+        const messageLower = message.toLowerCase();
+        
+        // Track mood patterns
+        if (emotion && emotion.emotion) {
+            this.userContext.moodPatterns.push({
+                emotion: emotion.emotion,
+                timestamp: new Date().toISOString(),
+                confidence: emotion.confidence
+            });
+            
+            // Keep only last 10 mood entries
+            if (this.userContext.moodPatterns.length > 10) {
+                this.userContext.moodPatterns = this.userContext.moodPatterns.slice(-10);
+            }
+        }
+
+        // Track recurring topics
+        const topics = this.detectTopics(messageLower);
+        topics.forEach(topic => {
+            if (!this.userContext.recurringIssues.includes(topic)) {
+                this.userContext.recurringIssues.push(topic);
+            }
+        });
+
+        // Update risk level based on content
+        this.assessRiskLevel(messageLower, emotion);
     }
 
-    getFallbackResponse(config) {
+    detectTopics(message) {
+        const topics = [];
+        const topicKeywords = {
+            'work': ['work', 'job', 'career', 'boss', 'colleague', 'deadline', 'meeting'],
+            'relationships': ['friend', 'partner', 'family', 'parent', 'boyfriend', 'girlfriend', 'wife', 'husband'],
+            'academic': ['school', 'college', 'university', 'exam', 'test', 'study', 'homework'],
+            'health': ['sick', 'pain', 'doctor', 'hospital', 'medication', 'health'],
+            'financial': ['money', 'bill', 'debt', 'financial', 'expensive', 'cost'],
+            'sleep': ['sleep', 'insomnia', 'tired', 'exhausted', 'bed', 'night'],
+            'trauma': ['abuse', 'trauma', 'ptsd', 'violent', 'assault']
+        };
+
+        for (const [topic, keywords] of Object.entries(topicKeywords)) {
+            if (keywords.some(keyword => message.includes(keyword))) {
+                topics.push(topic);
+            }
+        }
+
+        return topics;
+    }
+
+    assessRiskLevel(message, emotion) {
+        const riskKeywords = [
+            'suicide', 'kill myself', 'end it all', 'want to die', 'better off dead',
+            'harm myself', 'self harm', 'hurt myself', 'no way out'
+        ];
+
+        const urgentKeywords = [
+            'emergency', 'urgent', 'help now', 'immediate help', 'crisis'
+        ];
+
+        if (riskKeywords.some(keyword => message.includes(keyword))) {
+            this.userContext.riskLevel = 'high';
+        } else if (urgentKeywords.some(keyword => message.includes(keyword)) || 
+                  (emotion && emotion.emotion === 'anxious' && emotion.confidence > 0.8)) {
+            this.userContext.riskLevel = 'medium';
+        } else if (this.userContext.riskLevel === 'high' && 
+                  !riskKeywords.some(keyword => message.includes(keyword))) {
+            // Gradually lower risk level if no risk keywords detected
+            this.userContext.riskLevel = 'medium';
+        }
+    }
+
+    getEnhancedFallbackResponse(config) {
         const url = config.url;
         const requestData = config.data ? JSON.parse(config.data) : {};
         
         if (url.includes('/chat')) {
-            return this.getEnhancedFallbackChatResponse(requestData);
+            return this.getContextAwareChatResponse(requestData);
         } else if (url.includes('/exercises/breathing')) {
-            return this.getFallbackBreathingExercise();
+            return this.getPersonalizedBreathingExercise(requestData);
         } else if (url.includes('/emergency/help')) {
-            return this.getFallbackEmergencyResponse();
+            return this.getEnhancedEmergencyResponse(requestData);
         } else {
-            return { success: true, message: 'Demo mode active' };
+            return { 
+                success: true, 
+                message: 'Enhanced demo mode active',
+                demo_mode: true
+            };
         }
     }
 
-    getEnhancedFallbackChatResponse(requestData) {
+    getContextAwareChatResponse(requestData) {
         const message = requestData.message || '';
         const messageLower = message.toLowerCase();
+        const recentHistory = this.conversationHistory.slice(-5);
         
-        // Enhanced response system with context awareness
-        const response = this.generateContextAwareResponse(messageLower, requestData);
+        // Check for immediate risk
+        if (this.userContext.riskLevel === 'high') {
+            return this.getCrisisResponse(message);
+        }
+
+        // Get personalized response
+        const response = this.generatePersonalizedResponse(messageLower, recentHistory);
         
         return {
             success: true,
@@ -83,326 +176,434 @@ class APIService {
             suggest_exercise: response.suggestExercise,
             exercise_type: response.exerciseType,
             follow_up: response.followUp,
+            risk_assessment: this.userContext.riskLevel,
             demo_mode: true,
-            session_id: this.currentSessionId
+            session_id: this.currentSessionId,
+            context_aware: true
         };
     }
 
-    generateContextAwareResponse(message, context) {
-        // Get recent conversation context
-        const recentUserMessages = this.conversationHistory
-            .filter(msg => msg.sender === 'user')
-            .slice(-3)
-            .map(msg => msg.message.toLowerCase());
-
-        // Enhanced keyword mapping with more variations
-        const responseMap = {
-            // Greetings and general
-            greeting: {
-                patterns: ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening', 'howdy'],
-                responses: [
-                    "Hello! I'm your AI mental health companion. How are you feeling today?",
-                    "Hi there! I'm here to listen and support you. What's on your mind?",
-                    "Hello! It's good to connect with you. How has your day been?",
-                    "Hey! I'm glad you're here. How are you doing today?"
-                ],
-                emotion: { emotion: 'neutral', confidence: 0.8 },
-                suggestExercise: false
+    generatePersonalizedResponse(message, recentHistory) {
+        // Analyze conversation context
+        const context = this.analyzeConversationContext(recentHistory);
+        
+        // Enhanced response mapping with better context handling
+        const responseStrategies = {
+            // Crisis situations
+            crisis: {
+                triggers: ['suicide', 'kill myself', 'end it all', 'want to die', 'harm myself'],
+                response: () => this.getCrisisResponse(),
+                priority: 100
             },
 
-            // Positive emotions
-            happy: {
-                patterns: ['happy', 'good', 'great', 'awesome', 'excited', 'joy', 'amazing', 'wonderful', 'fantastic', 'excellent', 'perfect', 'bliss', 'ecstatic'],
-                responses: [
-                    "That's wonderful to hear! 😊 What's making you feel so positive today?",
-                    "I'm genuinely happy to hear that! Celebrating the good moments is important. Want to share what brought you joy?",
-                    "It's beautiful to hear you're feeling good! These positive moments are worth cherishing.",
-                    "Your happiness is contagious! Tell me more about what's going well for you.",
-                    "That's fantastic! Positive emotions like these are great for your mental health. What's been the highlight?"
-                ],
-                emotion: { emotion: 'happy', confidence: 0.9 },
-                suggestExercise: false,
-                followUp: "Would you like to explore ways to maintain this positive mindset?"
+            // Continuing conversations
+            followUp: {
+                triggers: [],
+                response: () => this.generateFollowUpResponse(context),
+                priority: 90,
+                condition: () => context.hasRecentExchange && !context.isGreeting
             },
 
-            // Sadness and depression
-            sad: {
-                patterns: ['sad', 'depressed', 'unhappy', 'miserable', 'hopeless', 'down', 'blue', 'gloomy', 'heartbroken', 'tearful', 'crying'],
-                responses: [
-                    "I'm really sorry you're feeling this way. 💙 It takes courage to acknowledge sadness. Would you like to talk about what's bothering you?",
-                    "I hear the pain in your words. Remember that these feelings, while heavy, are temporary. You're not alone in this.",
-                    "Thank you for sharing how you feel. Sadness can be overwhelming, but talking about it can help lighten the load.",
-                    "I'm here with you in this moment. It's okay to not be okay. Would a calming exercise help right now?",
-                    "Your feelings are completely valid. Sometimes just sitting with our sadness and acknowledging it can be the first step toward healing."
-                ],
-                emotion: { emotion: 'sad', confidence: 0.85 },
-                suggestExercise: true,
-                exerciseType: 'breathing'
+            // Specific emotional states
+            emotionalSupport: {
+                triggers: ['sad', 'depressed', 'anxious', 'scared', 'angry', 'lonely'],
+                response: () => this.getEmotionalSupportResponse(message, context),
+                priority: 80
             },
 
-            // Anxiety and stress
-            anxious: {
-                patterns: ['anxious', 'anxiety', 'nervous', 'worried', 'stress', 'stressed', 'overwhelmed', 'panic', 'scared', 'afraid', 'fear', 'worries'],
-                responses: [
-                    "Anxiety can feel incredibly overwhelming. Let's take a moment to breathe together. Remember, this feeling will pass.",
-                    "I understand that anxious feelings can be really challenging. You're safe here, and we can work through this together.",
-                    "It sounds like you're carrying a lot right now. Would you like to try a grounding exercise to help calm your nervous system?",
-                    "Anxiety often makes everything feel bigger than it is. Let's break it down together - what specifically is worrying you?",
-                    "I'm here with you. Let's focus on your breathing - in for 4 seconds, hold for 4, out for 4. You've got this."
-                ],
-                emotion: { emotion: 'anxious', confidence: 0.8 },
-                suggestExercise: true,
-                exerciseType: 'grounding'
+            // Practical help requests
+            practicalHelp: {
+                triggers: ['help with', 'how to', 'what should', 'advice', 'suggestion'],
+                response: () => this.getPracticalAdviceResponse(message, context),
+                priority: 70
             },
 
-            // Anger and frustration
-            angry: {
-                patterns: ['angry', 'mad', 'furious', 'frustrated', 'annoyed', 'irritated', 'pissed', 'rage', 'livid', 'fuming'],
-                responses: [
-                    "I can feel the frustration in your words. Anger is a natural emotion - it's telling you that something isn't right.",
-                    "It sounds like you're really upset right now. Would you like to try some techniques to help process these intense feelings?",
-                    "Anger can be overwhelming. Let's take a moment to breathe and create some space between you and the emotion.",
-                    "I understand you're feeling angry. Sometimes identifying what specifically triggered this can help us address it constructively.",
-                    "Your anger is valid. Let's work together to find healthy ways to express and process these feelings."
-                ],
-                emotion: { emotion: 'angry', confidence: 0.75 },
-                suggestExercise: true,
-                exerciseType: 'anger_management'
+            // Exercise requests
+            exerciseRequest: {
+                triggers: ['exercise', 'breathing', 'meditation', 'relax', 'calm'],
+                response: () => this.getExerciseSuggestionResponse(message),
+                priority: 60
             },
 
-            // Loneliness
-            lonely: {
-                patterns: ['lonely', 'alone', 'isolated', 'no friends', 'by myself', 'no one cares', 'abandoned'],
-                responses: [
-                    "Feeling lonely can be incredibly painful. I want you to know that you're not alone right now - I'm here with you.",
-                    "Loneliness is one of the hardest emotions to sit with. Thank you for reaching out - that takes real strength.",
-                    "I hear how isolated you're feeling. Human connection is so important. Would you like to talk about what kind of connections you're missing?",
-                    "You're brave for sharing this. Loneliness can make us feel invisible, but I see you and I'm listening.",
-                    "These feelings of loneliness are valid and real. Sometimes just having someone to witness our experience can help."
-                ],
-                emotion: { emotion: 'sad', confidence: 0.8 },
-                suggestExercise: false
-            },
-
-            // Sleep issues
-            sleep: {
-                patterns: ['sleep', 'insomnia', 'tired', 'exhausted', 'can\'t sleep', 'wake up', 'night', 'bed'],
-                responses: [
-                    "Sleep struggles can really impact everything else. Have you noticed any patterns in your sleep difficulties?",
-                    "Not sleeping well is incredibly frustrating. Good sleep is so important for mental health. What's your bedtime routine like?",
-                    "Sleep issues often connect with our daytime stress. Would you like to try some relaxation techniques that might help?",
-                    "I understand how exhausting sleep problems can be. Sometimes establishing a calming pre-sleep ritual can make a difference.",
-                    "Poor sleep can really affect our mood and coping abilities. Let's explore what might be interfering with your rest."
-                ],
-                emotion: { emotion: 'anxious', confidence: 0.7 },
-                suggestExercise: true,
-                exerciseType: 'relaxation'
-            },
-
-            // Work/School stress
-            work: {
-                patterns: ['work', 'job', 'school', 'college', 'university', 'exam', 'test', 'deadline', 'project', 'assignment', 'boss', 'teacher'],
-                responses: [
-                    "Work/school pressure can be really intense. What specifically is feeling overwhelming right now?",
-                    "Academic/professional stress is so common. Remember to break big tasks into smaller, manageable steps.",
-                    "The pressure you're describing sounds challenging. Have you been able to take any breaks for yourself?",
-                    "Stress from work/school can really build up. What's one small thing you could do to reduce the pressure?",
-                    "I hear how stressed you are about this. Sometimes just talking through the challenges can help them feel more manageable."
-                ],
-                emotion: { emotion: 'anxious', confidence: 0.75 },
-                suggestExercise: true,
-                exerciseType: 'stress_relief'
-            },
-
-            // Relationships
-            relationship: {
-                patterns: ['friend', 'family', 'partner', 'boyfriend', 'girlfriend', 'wife', 'husband', 'parents', 'mother', 'father', 'sibling', 'argument', 'fight'],
-                responses: [
-                    "Relationship challenges can be really painful. Would you like to talk about what's happening?",
-                    "Navigating relationships is complex. What specifically is feeling difficult right now?",
-                    "Relationship stress affects us deeply. Remember that your feelings in this situation are valid.",
-                    "It sounds like there's some tension in this relationship. What would a positive resolution look like for you?",
-                    "Relationship dynamics can be complicated. Sometimes setting boundaries can help maintain your wellbeing."
-                ],
-                emotion: { emotion: 'sad', confidence: 0.7 },
-                suggestExercise: false
-            },
-
-            // Self-care and coping
-            selfcare: {
-                patterns: ['self-care', 'cope', 'coping', 'manage', 'handle', 'deal with', 'self help', 'therapy'],
-                responses: [
-                    "Self-care is so important for mental health. What strategies have you tried that help you feel better?",
-                    "Finding healthy coping mechanisms is a journey. What activities usually help you feel more grounded?",
-                    "I'm glad you're thinking about self-care. Even small, consistent practices can make a big difference over time.",
-                    "Developing coping skills takes practice. What's one small thing you could do today to support your wellbeing?",
-                    "Self-care looks different for everyone. What does taking care of yourself mean to you right now?"
-                ],
-                emotion: { emotion: 'neutral', confidence: 0.8 },
-                suggestExercise: true,
-                exerciseType: 'mindfulness'
-            },
-
-            // Exercise suggestions
-            exercise: {
-                patterns: ['exercise', 'breathing', 'meditation', 'yoga', 'relax', 'calm down', 'grounding'],
-                responses: [
-                    "I'd be happy to guide you through an exercise! Would you prefer breathing, grounding, or relaxation techniques?",
-                    "Exercises can be really helpful for managing difficult emotions. What type of support are you looking for right now?",
-                    "Mindfulness practices can create space between you and intense emotions. Shall we try one together?",
-                    "I have several exercises that might help. Would you like something for anxiety, stress relief, or general relaxation?",
-                    "Practices like breathing and grounding can help regulate your nervous system. What would feel most supportive right now?"
-                ],
-                emotion: { emotion: 'neutral', confidence: 0.8 },
-                suggestExercise: true
-            },
-
-            // Gratitude and positive focus
-            gratitude: {
-                patterns: ['grateful', 'thankful', 'appreciate', 'blessed', 'lucky', 'fortunate'],
-                responses: [
-                    "Practicing gratitude is such a powerful tool for mental wellbeing! What are you feeling thankful for today?",
-                    "Focusing on what we're grateful for can really shift our perspective. Would you like to explore this more?",
-                    "Gratitude practices have been shown to improve mood and resilience. What's one small thing you appreciate right now?",
-                    "Noticing what we're thankful for, even in difficult times, takes real strength. What's bringing you comfort today?",
-                    "Gratitude can be such an anchor during challenging times. What moments of goodness have you experienced recently?"
-                ],
-                emotion: { emotion: 'happy', confidence: 0.8 },
-                suggestExercise: false
-            },
-
-            // Default/fallback responses
-            default: {
-                patterns: [],
-                responses: [
-                    "Thank you for sharing that with me. I'm here to listen and support you. Could you tell me more about what you're experiencing?",
-                    "I appreciate you opening up. How has this been affecting your daily life?",
-                    "Thank you for trusting me with this. What would be most helpful for you right now - listening, practical suggestions, or coping strategies?",
-                    "I'm listening carefully. What emotions are coming up for you as you share this?",
-                    "I hear what you're saying. Would you like to explore this further, or would you prefer to try a calming exercise?",
-                    "Thank you for being open with me. What aspect of this situation feels most challenging right now?",
-                    "I'm here with you in this. What would support look like for you in this moment?",
-                    "I appreciate you sharing this. How long have you been dealing with these feelings?",
-                    "Thank you for telling me about this. What's one small thing that might help you feel even slightly better?",
-                    "I'm listening. What would you like to focus on right now - understanding these feelings or finding ways to cope with them?"
-                ],
-                emotion: { emotion: 'neutral', confidence: 0.6 },
-                suggestExercise: false
+            // General conversation
+            general: {
+                triggers: [],
+                response: () => this.getGeneralResponse(message, context),
+                priority: 50
             }
         };
 
-        // Find matching response category
-        let matchedCategory = 'default';
-        for (const [category, data] of Object.entries(responseMap)) {
-            if (data.patterns.some(pattern => messageLower.includes(pattern))) {
-                matchedCategory = category;
-                break;
-            }
+        // Find the highest priority strategy that matches
+        const applicableStrategies = Object.values(responseStrategies)
+            .filter(strategy => 
+                strategy.triggers.some(trigger => message.includes(trigger)) ||
+                (strategy.condition && strategy.condition())
+            )
+            .sort((a, b) => b.priority - a.priority);
+
+        if (applicableStrategies.length > 0) {
+            return applicableStrategies[0].response();
         }
 
-        const categoryData = responseMap[matchedCategory];
-        const randomResponse = categoryData.responses[Math.floor(Math.random() * categoryData.responses.length)];
+        return this.getGeneralResponse(message, context);
+    }
+
+    analyzeConversationContext(recentHistory) {
+        const userMessages = recentHistory.filter(msg => msg.sender === 'user');
+        const aiMessages = recentHistory.filter(msg => msg.sender === 'ai');
+        
+        const lastUserMessage = userMessages[userMessages.length - 1];
+        const lastAiMessage = aiMessages[aiMessages.length - 1];
+
+        return {
+            hasRecentExchange: userMessages.length > 0 && aiMessages.length > 0,
+            isGreeting: this.isGreeting(lastUserMessage?.message || ''),
+            lastTopic: this.extractTopic(lastUserMessage?.message || ''),
+            emotionalTone: this.analyzeEmotionalTone(userMessages),
+            needsFollowUp: this.needsFollowUp(lastAiMessage),
+            conversationLength: recentHistory.length
+        };
+    }
+
+    isGreeting(message) {
+        const greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon'];
+        return greetings.some(greet => message.toLowerCase().includes(greet));
+    }
+
+    extractTopic(message) {
+        // Simplified topic extraction
+        if (message.includes('work') || message.includes('job')) return 'work';
+        if (message.includes('friend') || message.includes('partner')) return 'relationships';
+        if (message.includes('school') || message.includes('exam')) return 'academic';
+        if (message.includes('anxious') || message.includes('worried')) return 'anxiety';
+        if (message.includes('sad') || message.includes('depressed')) return 'depression';
+        return 'general';
+    }
+
+    analyzeEmotionalTone(messages) {
+        if (messages.length === 0) return 'neutral';
+        
+        const emotions = messages.map(msg => msg.emotion?.emotion).filter(Boolean);
+        if (emotions.length === 0) return 'neutral';
+        
+        // Return the most frequent emotion
+        const frequency = {};
+        emotions.forEach(emotion => {
+            frequency[emotion] = (frequency[emotion] || 0) + 1;
+        });
+        
+        return Object.keys(frequency).reduce((a, b) => 
+            frequency[a] > frequency[b] ? a : b
+        );
+    }
+
+    needsFollowUp(lastAiMessage) {
+        if (!lastAiMessage) return false;
+        
+        const followUpIndicators = [
+            'would you like', 'do you want', 'shall we', 'could you tell',
+            'what do you think', 'how do you feel about'
+        ];
+        
+        return followUpIndicators.some(indicator => 
+            lastAiMessage.message.toLowerCase().includes(indicator)
+        );
+    }
+
+    getCrisisResponse() {
+        return {
+            text: "I'm really concerned about what you're sharing. Your safety is the most important thing right now. Please reach out to one of these resources immediately:\n\n• National Suicide Prevention Lifeline: 1-800-273-8255\n• Crisis Text Line: Text HOME to 741741\n• Emergency Services: 911\n\nYou don't have to go through this alone. Professional help is available 24/7, and they're trained to support you through this.",
+            emotion: { emotion: 'concerned', confidence: 0.95 },
+            suggestExercise: false,
+            exerciseType: null,
+            followUp: "Please let me know if you've reached out for help, or if there's someone with you right now."
+        };
+    }
+
+    generateFollowUpResponse(context) {
+        const followUps = {
+            work: [
+                "How is the work situation affecting your overall wellbeing?",
+                "What aspects of work feel most manageable right now?",
+                "Have you noticed any patterns in what triggers your work stress?"
+            ],
+            relationships: [
+                "How are these relationship dynamics impacting your daily life?",
+                "What support do you feel you need in navigating this relationship?",
+                "Have you been able to communicate your feelings about this situation?"
+            ],
+            anxiety: [
+                "What helps you feel even slightly more grounded when anxiety arises?",
+                "How has your body been responding to these anxious feelings?",
+                "What moments of relief have you noticed recently?"
+            ],
+            depression: [
+                "What small activities still bring you moments of comfort?",
+                "How has your energy level been throughout the day?",
+                "What support feels most accessible to you right now?"
+            ],
+            general: [
+                "How have you been coping with these feelings?",
+                "What does support look like for you in this situation?",
+                "What small step forward feels possible right now?"
+            ]
+        };
+
+        const topicFollowUps = followUps[context.lastTopic] || followUps.general;
+        const randomFollowUp = topicFollowUps[Math.floor(Math.random() * topicFollowUps.length)];
+
+        return {
+            text: randomFollowUp,
+            emotion: { emotion: 'empathetic', confidence: 0.8 },
+            suggestExercise: context.emotionalTone === 'anxious',
+            exerciseType: 'grounding',
+            followUp: null
+        };
+    }
+
+    getEmotionalSupportResponse(message, context) {
+        const supportResponses = {
+            sad: [
+                "It sounds like you're carrying some heavy feelings right now. Thank you for sharing that with me. What's been most challenging about these feelings?",
+                "I hear the pain in what you're describing. These emotions can feel overwhelming, but you're not alone in this. What moments have been particularly difficult recently?",
+                "Thank you for trusting me with these feelings. It takes courage to acknowledge when we're struggling. What does support look like for you right now?"
+            ],
+            anxious: [
+                "Anxiety can make everything feel so overwhelming. I'm here with you. What's helping you get through these moments?",
+                "It sounds like your nervous system is really activated right now. Let's focus on helping you feel a bit more grounded. What's one thing you can see and describe in detail around you?",
+                "I understand how consuming anxiety can be. You're safe here, and we can work through this together. What specifically is feeling most worrisome?"
+            ],
+            angry: [
+                "I can feel the intensity in what you're sharing. Anger often points to something that matters deeply to us. What feels most unfair about this situation?",
+                "It sounds like you're dealing with some really frustrating circumstances. Your feelings are completely valid. What would help you feel heard or respected in this situation?",
+                "Anger can be such a powerful and overwhelming emotion. What space do you need to process these feelings in a way that serves you?"
+            ]
+        };
+
+        // Determine primary emotion from message
+        let primaryEmotion = 'sad';
+        if (message.includes('anxious') || message.includes('worried') || message.includes('scared')) {
+            primaryEmotion = 'anxious';
+        } else if (message.includes('angry') || message.includes('mad') || message.includes('frustrated')) {
+            primaryEmotion = 'angry';
+        }
+
+        const responses = supportResponses[primaryEmotion] || supportResponses.sad;
+        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
 
         return {
             text: randomResponse,
-            emotion: categoryData.emotion,
-            suggestExercise: categoryData.suggestExercise || false,
-            exerciseType: categoryData.exerciseType || 'breathing',
-            followUp: categoryData.followUp || null
+            emotion: { emotion: primaryEmotion, confidence: 0.85 },
+            suggestExercise: true,
+            exerciseType: primaryEmotion === 'anxious' ? 'breathing' : 'grounding',
+            followUp: "Would you like to explore this further, or try a calming exercise together?"
         };
     }
 
-    getFallbackBreathingExercise() {
+    getPracticalAdviceResponse(message, context) {
+        const adviceResponses = [
+            "That's a challenging situation. What approaches have you considered so far?",
+            "I understand you're looking for some guidance. What would a positive outcome look like for you in this situation?",
+            "That's a thoughtful question. What resources or support systems do you have available to help with this?",
+            "I appreciate you seeking input. What's one small step you could take that would move you in a positive direction?",
+            "That's an important consideration. What values are most important to you in navigating this situation?"
+        ];
+
+        return {
+            text: adviceResponses[Math.floor(Math.random() * adviceResponses.length)],
+            emotion: { emotion: 'supportive', confidence: 0.8 },
+            suggestExercise: false,
+            exerciseType: null,
+            followUp: "How does that approach resonate with you?"
+        };
+    }
+
+    getExerciseSuggestionResponse(message) {
+        return {
+            text: "I'd be happy to guide you through an exercise. Based on what you've shared, I'd recommend starting with a simple breathing exercise to help center yourself. Would you like to try the 4-7-8 breathing technique, or would you prefer a grounding exercise?",
+            emotion: { emotion: 'calm', confidence: 0.8 },
+            suggestExercise: true,
+            exerciseType: 'breathing',
+            followUp: "Remember, you can always adjust any exercise to suit your comfort level."
+        };
+    }
+
+    getGeneralResponse(message, context) {
+        const generalResponses = [
+            "Thank you for sharing that with me. I'm here to listen and support you. Could you tell me more about what this experience has been like for you?",
+            "I appreciate you opening up about this. How has this been affecting your daily routine and overall wellbeing?",
+            "Thank you for trusting me with this. What would be most helpful for you right now - someone to listen, practical suggestions, or coping strategies?",
+            "I'm listening carefully to what you're sharing. What emotions are coming up for you as we discuss this?",
+            "I hear what you're saying. Would you like to explore this further, or would you prefer to shift to something that might help you feel more grounded?",
+            "Thank you for being open with me. What aspect of this situation feels most meaningful to focus on right now?"
+        ];
+
+        return {
+            text: generalResponses[Math.floor(Math.random() * generalResponses.length)],
+            emotion: { emotion: 'neutral', confidence: 0.7 },
+            suggestExercise: context.emotionalTone === 'anxious',
+            exerciseType: 'breathing',
+            followUp: "What's coming up for you as you reflect on this?"
+        };
+    }
+
+    getPersonalizedBreathingExercise(requestData) {
+        // Select exercise based on user context and risk level
+        let exerciseType = 'box'; // default
+        
+        if (this.userContext.riskLevel === 'high') {
+            exerciseType = 'grounding'; // More immediate relief
+        } else if (this.userContext.preferredExercises.length > 0) {
+            exerciseType = this.userContext.preferredExercises[0];
+        }
+
         const exercises = {
             '478': {
-                name: '4-7-8 Breathing',
-                description: 'Calming technique for stress and anxiety relief',
+                name: '4-7-8 Breathing for Calm',
+                description: 'Gentle breathing technique to reduce anxiety and promote relaxation',
                 instructions: [
-                    'Find a comfortable seated position with your back straight',
-                    'Place the tip of your tongue against the roof of your mouth, just behind your front teeth',
-                    'Exhale completely through your mouth, making a whoosh sound',
-                    'Close your mouth and inhale quietly through your nose for 4 seconds',
-                    'Hold your breath for 7 seconds',
-                    'Exhale completely through your mouth for 8 seconds, making a whoosh sound',
-                    'Repeat this cycle 3-4 times',
-                    'Notice how your body begins to relax with each breath'
+                    'Find a comfortable position, either sitting or lying down',
+                    'Place one hand on your chest and the other on your belly',
+                    'Take a moment to notice your natural breath',
+                    'Exhale completely through your mouth',
+                    'Close your mouth and inhale quietly through your nose for 4 counts',
+                    'Hold your breath for 7 counts',
+                    'Exhale slowly through your mouth for 8 counts',
+                    'Repeat 3-4 times, noticing the calming effect',
+                    'Return to your natural breathing rhythm'
                 ],
                 duration: 3,
-                benefits: ['Reduces anxiety', 'Helps with sleep', 'Calms the nervous system', 'Promotes relaxation']
+                benefits: ['Reduces anxiety', 'Promotes sleep', 'Calms nervous system', 'Increases mindfulness'],
+                bestFor: ['Anxiety', 'Sleep issues', 'Stress']
             },
             'box': {
-                name: 'Box Breathing',
-                description: 'Military technique for focus and calm under pressure',
+                name: 'Box Breathing for Focus',
+                description: 'Structured breathing to enhance concentration and emotional regulation',
                 instructions: [
-                    'Sit upright in a comfortable position with your hands resting on your lap',
-                    'Slowly exhale all the air from your lungs',
-                    'Inhale through your nose for 4 seconds, filling your lungs completely',
-                    'Hold your breath for 4 seconds',
-                    'Exhale through your mouth for 4 seconds, emptying your lungs completely',
-                    'Hold at the bottom for 4 seconds before your next inhale',
-                    'Repeat 5-10 times',
-                    'Focus on making each part of the breath equal in duration'
+                    'Sit comfortably with your back straight and shoulders relaxed',
+                    'Exhale completely, emptying your lungs',
+                    'Inhale through your nose for 4 counts, filling your lungs gradually',
+                    'Hold your breath for 4 counts, maintaining comfort',
+                    'Exhale through your mouth for 4 counts, releasing tension',
+                    'Hold at the bottom for 4 counts before beginning again',
+                    'Repeat 5-6 times, maintaining equal timing',
+                    'Notice increased mental clarity and calm'
                 ],
-                duration: 5,
-                benefits: ['Improves focus', 'Reduces stress', 'Increases alertness', 'Regulates nervous system']
+                duration: 4,
+                benefits: ['Improves focus', 'Reduces stress', 'Enhances emotional control', 'Boosts energy'],
+                bestFor: ['Stress', 'Focus issues', 'Emotional regulation']
             },
             'grounding': {
-                name: '5-4-3-2-1 Grounding Exercise',
-                description: 'Technique to bring awareness to the present moment',
+                name: '5-4-3-2-1 Grounding Practice',
+                description: 'Sensory awareness exercise to anchor in the present moment',
                 instructions: [
                     'Take three deep breaths to center yourself',
-                    'Name 5 things you can see around you',
-                    'Name 4 things you can touch or feel',
-                    'Name 3 things you can hear',
-                    'Name 2 things you can smell',
+                    'Look around and name 5 things you can see',
+                    'Notice 4 things you can touch or feel',
+                    'Listen for 3 things you can hear',
+                    'Identify 2 things you can smell',
                     'Name 1 thing you can taste',
                     'Take three more deep breaths',
-                    'Notice how you feel more present and grounded'
+                    'Notice how you feel more present and connected'
                 ],
                 duration: 3,
-                benefits: ['Reduces anxiety', 'Brings present-moment awareness', 'Helps with panic attacks', 'Grounds in reality']
+                benefits: ['Reduces anxiety', 'Prevents overwhelm', 'Increases present-moment awareness', 'Grounds in reality'],
+                bestFor: ['Panic attacks', 'Anxiety spikes', 'Dissociation']
             }
         };
 
-        const exerciseTypes = Object.keys(exercises);
-        const randomExercise = exercises[exerciseTypes[Math.floor(Math.random() * exerciseTypes.length)]];
+        const exercise = exercises[exerciseType] || exercises.box;
 
         return {
             success: true,
             exercise: {
-                ...randomExercise,
+                ...exercise,
+                personalized: true,
+                risk_level: this.userContext.riskLevel,
                 demo_mode: true
             }
         };
     }
 
-    getFallbackEmergencyResponse() {
-        return {
-            success: true,
-            emergency_response: {
-                message: '🚨 Support Resources Available',
+    getEnhancedEmergencyResponse(requestData) {
+        const crisisLevel = requestData.crisis_level || 'high';
+        
+        const emergencyResources = {
+            high: {
+                message: '🚨 Immediate Support Available',
+                priority: 'HIGH PRIORITY - Please reach out now',
                 actions: [
                     'National Suicide Prevention Lifeline: 1-800-273-8255',
                     'Crisis Text Line: Text HOME to 741741',
                     'Emergency Services: 911',
-                    'Trevor Project (LGBTQ+): 1-866-488-7386',
-                    'Veterans Crisis Line: 1-800-273-8255, press 1',
-                    'Disaster Distress Helpline: 1-800-985-5990'
+                    'Online Crisis Chat: suicidepreventionlifeline.org/chat'
                 ],
-                instructions: 'You are not alone. Professional help is available 24/7. Please reach out if you need immediate support.'
+                instructions: 'You are not alone. Professional crisis counselors are available 24/7 and are trained to help. Please reach out to one of these resources right now.'
             },
-            demo_mode: true
+            medium: {
+                message: '📞 Support Resources Available',
+                priority: 'Support recommended within 24 hours',
+                actions: [
+                    'Mental Health America: 1-800-273-TALK',
+                    'SAMHSA Helpline: 1-800-662-4357',
+                    'Therapy Referrals: psychologytoday.com',
+                    'Warm Lines (Peer Support): warmline.org'
+                ],
+                instructions: 'Connecting with support can help prevent crises from escalating. Consider reaching out to these resources for guidance and support.'
+            },
+            low: {
+                message: '💫 Mental Health Resources',
+                priority: 'Proactive support available',
+                actions: [
+                    'Therapist Directory: psychologytoday.com',
+                    'Mental Health Apps: Headspace, Calm, Woebot',
+                    'Support Groups: NAMI.org',
+                    'Crisis Planning: coping ahead strategies'
+                ],
+                instructions: 'Building support systems before crises occur is an important part of mental wellness. These resources can help you maintain your wellbeing.'
+            }
+        };
+
+        const response = emergencyResources[crisisLevel] || emergencyResources.high;
+
+        return {
+            success: true,
+            emergency_response: response,
+            risk_level: this.userContext.riskLevel,
+            demo_mode: true,
+            timestamp: new Date().toISOString()
         };
     }
 
+    async registerUser(userData) {
+        try {
+            const response = await this.client.post('/register', userData);
+            return response.data;
+        } catch (error) {
+            if (error.response && error.response.data) return error.response.data;
+            return { success: false, error: 'Registration failed' };
+        }
+    }
+
+    async loginUser(credentials) {
+        try {
+            const response = await this.client.post('/login', credentials);
+            return response.data;
+        } catch (error) {
+            if (error.response && error.response.data) return error.response.data;
+            return { success: false, error: 'Login failed' };
+        }
+    }
+
     async chatWithAI(message, userId, emotionContext = {}) {
-        // Start session if not already started
         if (!this.currentSessionId) {
             this.startNewSession(userId);
         }
 
-        // Add user message to history
-        this.addToHistory(message, 'user', emotionContext);
+        this.addToHistory(message, 'user', emotionContext, {
+            wordCount: message.split(' ').length,
+            containsQuestion: message.includes('?')
+        });
 
         try {
             const response = await this.client.post('/chat', {
@@ -410,65 +611,108 @@ class APIService {
                 user_id: userId,
                 emotion_context: emotionContext,
                 session_id: this.currentSessionId,
-                conversation_history: this.conversationHistory.slice(-5) // Send last 5 messages for context
+                conversation_history: this.conversationHistory.slice(-8), // Increased context
+                user_context: this.userContext
             });
 
-            // Add AI response to history
             if (response.data.success) {
-                this.addToHistory(response.data.response, 'ai', response.data.emotion_detected);
+                this.addToHistory(response.data.response, 'ai', response.data.emotion_detected, {
+                    suggested_exercise: response.data.suggest_exercise,
+                    risk_assessment: response.data.risk_assessment
+                });
             }
 
             return response.data;
         } catch (error) {
             console.error('AI chat error, using enhanced fallback:', error);
-            const fallbackResponse = this.getEnhancedFallbackChatResponse({ message });
+            const fallbackResponse = this.getContextAwareChatResponse({ message });
             
-            // Add fallback response to history
-            this.addToHistory(fallbackResponse.response, 'ai', fallbackResponse.emotion_detected);
+            this.addToHistory(fallbackResponse.response, 'ai', fallbackResponse.emotion_detected, {
+                suggested_exercise: fallbackResponse.suggest_exercise,
+                risk_assessment: fallbackResponse.risk_assessment,
+                fallback_used: true
+            });
             
             return fallbackResponse;
         }
     }
 
-    async getBreathingExercise(type = 'random') {
+    async getBreathingExercise(type = 'contextual') {
         try {
             const response = await this.client.get('/exercises/breathing', {
-                params: { type }
+                params: { 
+                    type,
+                    risk_level: this.userContext.riskLevel,
+                    user_preferences: this.userContext.preferredExercises
+                }
             });
             return response.data;
         } catch (error) {
-            console.error('Breathing exercise error, using fallback:', error);
-            return this.getFallbackBreathingExercise();
+            console.error('Breathing exercise error, using personalized fallback:', error);
+            return this.getPersonalizedBreathingExercise();
         }
     }
 
-    async connectCounselor(userId, preference = 'any') {
+    async connectCounselor(userId, preference = 'contextual') {
         try {
             const response = await this.client.post('/emergency/help', {
                 user_id: userId,
-                crisis_level: 'high',
-                session_id: this.currentSessionId
+                crisis_level: this.userContext.riskLevel,
+                session_id: this.currentSessionId,
+                user_context: this.userContext
             });
             return response.data;
         } catch (error) {
-            console.error('Counselor connection error, using fallback:', error);
-            return this.getFallbackEmergencyResponse();
+            console.error('Counselor connection error, using enhanced fallback:', error);
+            return this.getEnhancedEmergencyResponse({ crisis_level: this.userContext.riskLevel });
         }
     }
 
     async triggerEmergency(userId, crisisLevel, emotionData = {}) {
+        // Update risk level based on manual trigger
+        this.userContext.riskLevel = crisisLevel;
+        
         try {
             const response = await this.client.post('/emergency/help', {
                 user_id: userId,
                 crisis_level: crisisLevel,
                 emotion_data: emotionData,
-                session_id: this.currentSessionId
+                session_id: this.currentSessionId,
+                user_context: this.userContext
             });
             return response.data;
         } catch (error) {
-            console.error('Emergency trigger error, using fallback:', error);
-            return this.getFallbackEmergencyResponse();
+            console.error('Emergency trigger error, using enhanced fallback:', error);
+            return this.getEnhancedEmergencyResponse({ crisis_level: crisisLevel });
         }
+    }
+
+    // Utility methods
+    getUserContext() {
+        return { ...this.userContext };
+    }
+
+    getConversationSummary() {
+        const userMessages = this.conversationHistory.filter(msg => msg.sender === 'user');
+        const recentEmotions = this.userContext.moodPatterns.slice(-5);
+        
+        return {
+            totalExchanges: this.conversationHistory.length,
+            primaryTopics: this.userContext.recurringIssues,
+            emotionalPattern: recentEmotions,
+            riskLevel: this.userContext.riskLevel,
+            lastActivity: this.conversationHistory[this.conversationHistory.length - 1]?.timestamp
+        };
+    }
+
+    resetUserContext() {
+        this.userContext = {
+            moodPatterns: [],
+            recurringIssues: [],
+            preferredExercises: [],
+            riskLevel: 'low',
+            lastMoodCheck: new Date().toISOString()
+        };
     }
 }
 

@@ -2,12 +2,16 @@
 import React, { useState, useEffect } from 'react';
 import WebSocketService from './services/websocket';
 import EmotionService from './services/emotionService';
+import APIService from './services/api';
 import MultiModalScanner from './components/EmotionScanner/MultiModalScanner';
 import ChatInterface from './components/AITherapist/ChatInterface';
 import WellnessCenter from './components/WellnessCenter/WellnessCenter';
 import AnalyticsDashboard from './components/Analytics/AnalyticsDashboard';
 import EmergencyIntervention from './components/Emergency/EmergencyIntervention';
 import './App.css';
+
+// Import your logo image - adjust the path according to your project structure
+import logo from './assets/images/logo-removebg-preview.png'; // or whatever your logo path is
 
 function App() {
     const [currentView, setCurrentView] = useState('scanner');
@@ -64,7 +68,7 @@ function App() {
         if (Notification.permission === 'granted') {
             new Notification('Mental Health Alert', {
                 body: `Crisis level: ${alertData.crisis_level}. Immediate attention recommended.`,
-                icon: '/icon.png'
+                icon: '/icon.jpeg'
             });
         }
     };
@@ -107,7 +111,10 @@ function App() {
             {/* Navigation */}
             <nav className="app-nav">
                 <div className="nav-brand">
-                    <h2>🧠 MindCompanion</h2>
+                    <div className="logo-container">
+                        <img src={logo} alt="MindCompanion Logo" className="nav-logo" />
+                        <h2>MindCompanion</h2>
+                    </div>
                     <span className="user-greeting">Hello, {user.name}</span>
                 </div>
                 
@@ -181,7 +188,7 @@ function App() {
                     className="panic-button"
                     onClick={() => setCurrentView('emergency')}
                 >
-                    🚨 Emergency Help
+                     Emergency Help
                 </button>
             </div>
         </div>
@@ -197,27 +204,62 @@ const LoginScreen = ({ onLogin }) => {
         password: '',
         studentId: ''
     });
+    const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Mock login - in real app, this would call your auth API
-        const userData = {
-            id: 'user_' + Date.now(),
-            name: formData.name,
-            email: formData.email,
-            studentId: formData.studentId,
-            joinedAt: new Date().toISOString()
-        };
-        onLogin(userData);
+        
+        if (isRegistering) {
+            const response = await APIService.registerUser({
+                name: formData.name,
+                email: formData.email,
+                studentId: formData.studentId,
+                password: formData.password
+            });
+            
+            if (response.success) {
+                setRegistrationSuccess(true);
+                setIsRegistering(false);
+                setFormData({
+                    name: '',
+                    email: '',
+                    password: '',
+                    studentId: ''
+                });
+            } else {
+                alert(response.error || 'Registration failed');
+            }
+        } else {
+            const response = await APIService.loginUser({
+                email: formData.email,
+                password: formData.password
+            });
+            
+            if (response.success) {
+                onLogin(response.user);
+            } else {
+                alert(response.error || 'Login failed');
+            }
+        }
     };
 
     return (
         <div className="login-screen">
             <div className="login-container">
                 <div className="login-header">
-                    <h1>🧠 MindCompanion</h1>
+                    <div className="logo-container">
+                        <img src={logo} alt="MindCompanion Logo" className="login-logo" />
+                        <h1>MindCompanion</h1>
+                    </div>
                     <p>AI-Powered Mental Health Support for Students</p>
                 </div>
+                
+                {/* Registration Success Message */}
+                {registrationSuccess && (
+                    <div className="registration-success">
+                        <p>✅ Registration successful! Please login with your credentials.</p>
+                    </div>
+                )}
                 
                 <form onSubmit={handleSubmit} className="login-form">
                     <h2>{isRegistering ? 'Create Account' : 'Welcome Back'}</h2>
@@ -265,7 +307,10 @@ const LoginScreen = ({ onLogin }) => {
                 <div className="login-footer">
                     <button 
                         className="switch-mode"
-                        onClick={() => setIsRegistering(!isRegistering)}
+                        onClick={() => {
+                            setIsRegistering(!isRegistering);
+                            setRegistrationSuccess(false); // Reset success message when switching modes
+                        }}
                     >
                         {isRegistering 
                             ? 'Already have an account? Login' 

@@ -18,11 +18,12 @@ const MultiModalScanner = ({ user, onEmotionUpdate }) => {
                 const loaded = await EmotionService.loadModels();
                 setModelsLoaded(loaded);
                 if (!loaded) {
-                    console.log('Running in demo mode with mock emotion data');
+                    setError('Failed to load FaceAPI models. Please ensure they exist in public/models.');
                 }
             } catch (err) {
-                console.log('Service initialized in demo mode');
+                console.error('Service initialization error:', err);
                 setModelsLoaded(false);
+                setError('Failed to initialize FaceAPI service.');
             }
         };
 
@@ -44,28 +45,24 @@ const MultiModalScanner = ({ user, onEmotionUpdate }) => {
             // Scan for emotions every 2 seconds
             interval = setInterval(async () => {
                 try {
-                    let emotionData;
+                    let emotionData = null;
                     
                     if (webcamRef.current && modelsLoaded) {
-                        // In production, this would capture and analyze real images
-                        // For demo, we'll use mock data
-                        emotionData = EmotionService.getMockEmotions();
-                    } else {
-                        // Use mock emotions
-                        emotionData = EmotionService.getMockEmotions();
+                        const video = webcamRef.current.video;
+                        if (video && video.readyState === 4) {
+                            emotionData = await EmotionService.detectEmotionsFromImage(video);
+                        }
                     }
                     
-                    setEmotions(emotionData);
-                    onEmotionUpdate(emotionData);
+                    if (emotionData) {
+                        setEmotions(emotionData);
+                        onEmotionUpdate(emotionData);
+                    }
                     
                 } catch (err) {
                     console.error('Error in emotion scan:', err);
-                    setError('Scanning error. Using demo data.');
-                    
-                    // Fallback to mock emotions
-                    const emotionData = EmotionService.getMockEmotions();
-                    setEmotions(emotionData);
-                    onEmotionUpdate(emotionData);
+                    setError('Scanning error. Please ensure camera access is granted.');
+                    stopFaceScan();
                 }
             }, 2000);
         }
@@ -79,7 +76,7 @@ const MultiModalScanner = ({ user, onEmotionUpdate }) => {
     const startFaceScan = () => {
         setError('');
         setIsScanning(true);
-        console.log('Face scan started in demo mode');
+        console.log('Face scan started');
     };
 
     const stopFaceScan = () => {
@@ -113,9 +110,9 @@ const MultiModalScanner = ({ user, onEmotionUpdate }) => {
             <div className="scanner-header">
                 <h2>Emotion Scanner</h2>
                 <p>Analyze your emotional state through facial expressions</p>
-                {!modelsLoaded && (
-                    <div className="demo-notice">
-                        🎭 Running in Demo Mode - Using simulated emotion data
+                {!modelsLoaded && !error && (
+                    <div className="loading-notice">
+                        ⌛ Loading Emotion Models...
                     </div>
                 )}
             </div>
@@ -219,11 +216,6 @@ const MultiModalScanner = ({ user, onEmotionUpdate }) => {
                         <li>Scan automatically updates emotional state in real-time</li>
                         <li>Click "Stop Scan" to end the session</li>
                     </ul>
-                    
-                    <div className="tech-note">
-                        <strong>Technical Note:</strong> This demo uses simulated emotion data. 
-                        In production, we use advanced AI models for real facial expression analysis.
-                    </div>
                 </div>
             </div>
         </div>

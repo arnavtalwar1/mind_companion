@@ -10,12 +10,231 @@ const WellnessCenter = ({ user }) => {
     const [breathingTime, setBreathingTime] = useState(0);
     const [meditationTime, setMeditationTime] = useState(0);
     const [meditationActive, setMeditationActive] = useState(false);
-    const [soundActive, setSoundActive] = useState(false);
-    const [currentSound, setCurrentSound] = useState(null);
+    const [videoActive, setVideoActive] = useState(false);
+    const [currentVideo, setCurrentVideo] = useState(null);
     const [stretchActive, setStretchActive] = useState(false);
     const [currentStretch, setCurrentStretch] = useState(null);
     const [mindfulnessActive, setMindfulnessActive] = useState(false);
     const [currentMindfulness, setCurrentMindfulness] = useState(null);
+    const [userMood, setUserMood] = useState('calm'); // Default mood
+
+    // YouTube videos categorized by mood
+    const moodVideos = {
+        calm: [
+            {
+                id: 1,
+                title: 'Peaceful Piano & Guitar',
+                description: 'Soft instrumental music for relaxation',
+                youtubeId: 'yIQd2Ya0Ziw',
+                duration: '1 hour',
+                category: 'music',
+                mood: 'calm'
+            },
+            {
+                id: 2,
+                title: 'Gentle Rain Sounds',
+                description: 'Soothing rain for meditation and sleep',
+                youtubeId: 'q76bMs-NwRk',
+                duration: '8 hours',
+                category: 'nature',
+                mood: 'calm'
+            },
+            {
+                id: 3,
+                title: 'Mountain Stream',
+                description: 'Calming water sounds for focus',
+                youtubeId: 'H7rm1zvlgag',
+                duration: '3 hours',
+                category: 'nature',
+                mood: 'calm'
+            }
+        ],
+        anxious: [
+            {
+                id: 4,
+                title: 'Anxiety Relief Music',
+                description: 'Healing frequencies for nervous system',
+                youtubeId: 'Z2iZzFQ_qJc',
+                duration: '3 hours',
+                category: 'therapy',
+                mood: 'anxious'
+            },
+            {
+                id: 5,
+                title: 'Grounding Meditation',
+                description: 'Emergency anxiety relief techniques',
+                youtubeId: 'KcQi2w1UES4',
+                duration: '15 min',
+                category: 'meditation',
+                mood: 'anxious'
+            },
+            {
+                id: 6,
+                title: 'Calming Ocean Waves',
+                description: 'Deep relaxation for anxious moments',
+                youtubeId: 'a8MskTwOm4k',
+                duration: '8 hours',
+                category: 'nature',
+                mood: 'anxious'
+            }
+        ],
+        sad: [
+            {
+                id: 7,
+                title: 'Comforting Piano',
+                description: 'Gentle music for difficult moments',
+                youtubeId: 'hZ_7L-qeX8U',
+                duration: '1 hour',
+                category: 'music',
+                mood: 'sad'
+            },
+            {
+                id: 8,
+                title: 'Healing Frequency',
+                description: 'Music to uplift and comfort',
+                youtubeId: 'Ldpd6eGH1MA',
+                duration: '3 hours',
+                category: 'therapy',
+                mood: 'sad'
+            },
+            {
+                id: 9,
+                title: 'Hopeful Instrumental',
+                description: 'Inspirational music for tough times',
+                youtubeId: 'xNN7sBPqN-c',
+                duration: '2 hours',
+                category: 'music',
+                mood: 'sad'
+            }
+        ],
+        stressed: [
+            {
+                id: 10,
+                title: 'Stress Relief Music',
+                description: 'Immediate stress reduction',
+                youtubeId: 'Y3DpNr1qQk8',
+                duration: '1 hour',
+                category: 'therapy',
+                mood: 'stressed'
+            },
+            {
+                id: 11,
+                title: 'Tibetan Singing Bowls',
+                description: 'Deep relaxation and stress relief',
+                youtubeId: 'YdraR8D0-S8',
+                duration: '3 hours',
+                category: 'therapy',
+                mood: 'stressed'
+            },
+            {
+                id: 12,
+                title: 'Forest Meditation',
+                description: 'Nature sounds for stress relief',
+                youtubeId: 'W7JGPgLTlY8',
+                duration: '8 hours',
+                category: 'nature',
+                mood: 'stressed'
+            }
+        ],
+        angry: [
+            {
+                id: 13,
+                title: 'Anger Management Music',
+                description: 'Calming frequencies for emotional regulation',
+                youtubeId: '4RCPpz5-Y8I',
+                duration: '1 hour',
+                category: 'therapy',
+                mood: 'angry'
+            },
+            {
+                id: 14,
+                title: 'Waterfall Sounds',
+                description: 'Powerful yet calming water sounds',
+                youtubeId: 'z3U4nLdSLp0',
+                duration: '3 hours',
+                category: 'nature',
+                mood: 'angry'
+            },
+            {
+                id: 15,
+                title: 'Release & Let Go',
+                description: 'Music for emotional release',
+                youtubeId: '1XUfY1_9NRE',
+                duration: '2 hours',
+                category: 'therapy',
+                mood: 'angry'
+            }
+        ],
+        tired: [
+            {
+                id: 16,
+                title: 'Sleep Meditation',
+                description: 'Guided sleep and relaxation',
+                youtubeId: 'aEqlQvczMJQ',
+                duration: '1 hour',
+                category: 'meditation',
+                mood: 'tired'
+            },
+            {
+                id: 17,
+                title: 'Deep Sleep Music',
+                description: 'Delta waves for restful sleep',
+                youtubeId: '1ZYbU82GVz4',
+                duration: '8 hours',
+                category: 'therapy',
+                mood: 'tired'
+            },
+            {
+                id: 18,
+                title: 'Soft Rain & Thunder',
+                description: 'Gentle storm for deep relaxation',
+                youtubeId: 'mF0CyeDZ6Lc',
+                duration: '10 hours',
+                category: 'nature',
+                mood: 'tired'
+            }
+        ],
+        focused: [
+            {
+                id: 19,
+                title: 'Study & Focus Music',
+                description: 'Concentration enhancing frequencies',
+                youtubeId: 'HCWvgoTfUjg',
+                duration: '24/7 live',
+                category: 'music',
+                mood: 'focused'
+            },
+            {
+                id: 20,
+                title: 'Deep Work Ambient',
+                description: 'Music for productivity and flow',
+                youtubeId: 'hHW1oY26kxQ',
+                duration: '2 hours',
+                category: 'music',
+                mood: 'focused'
+            },
+            {
+                id: 21,
+                title: 'Coffee Shop Ambience',
+                description: 'Background noise for concentration',
+                youtubeId: 'rUxyKA_-grg',
+                duration: '2 hours',
+                category: 'ambience',
+                mood: 'focused'
+            }
+        ]
+    };
+
+    // Mood selection options
+    const moodOptions = [
+        { id: 'calm', name: '😌 Calm', description: 'Relaxed and peaceful' },
+        { id: 'anxious', name: '😰 Anxious', description: 'Feeling worried or nervous' },
+        { id: 'sad', name: '😔 Sad', description: 'Feeling down or blue' },
+        { id: 'stressed', name: '😫 Stressed', description: 'Overwhelmed or pressured' },
+        { id: 'angry', name: '😠 Angry', description: 'Frustrated or upset' },
+        { id: 'tired', name: '😴 Tired', description: 'Low energy or sleepy' },
+        { id: 'focused', name: '🎯 Focused', description: 'Need concentration' }
+    ];
 
     // Breathing Exercise
     const startBreathingExercise = async (type = '478') => {
@@ -141,37 +360,10 @@ const WellnessCenter = ({ user }) => {
         }, 1000);
     };
 
-    // Sound Therapy
-    const startSoundTherapy = (soundType) => {
-        const sounds = {
-            rain: {
-                name: 'Rain Sounds',
-                description: 'Calming rain for relaxation',
-                icon: '🌧️',
-                audio: '/sounds/rain.mp3' // You would add actual sound files
-            },
-            ocean: {
-                name: 'Ocean Waves',
-                description: 'Soothing ocean waves',
-                icon: '🌊',
-                audio: '/sounds/ocean.mp3'
-            },
-            forest: {
-                name: 'Forest Sounds',
-                description: 'Peaceful forest ambiance',
-                icon: '🌲',
-                audio: '/sounds/forest.mp3'
-            },
-            white: {
-                name: 'White Noise',
-                description: 'Consistent sound for focus',
-                icon: '📻',
-                audio: '/sounds/white-noise.mp3'
-            }
-        };
-
-        setCurrentSound(sounds[soundType]);
-        setSoundActive(true);
+    // Video Therapy based on mood
+    const startVideoTherapy = (video) => {
+        setCurrentVideo(video);
+        setVideoActive(true);
     };
 
     // Stretching Exercises
@@ -292,8 +484,8 @@ const WellnessCenter = ({ user }) => {
         setBreathingTime(0);
         setMeditationActive(false);
         setMeditationTime(0);
-        setSoundActive(false);
-        setCurrentSound(null);
+        setVideoActive(false);
+        setCurrentVideo(null);
         setStretchActive(false);
         setCurrentStretch(null);
         setMindfulnessActive(false);
@@ -304,6 +496,14 @@ const WellnessCenter = ({ user }) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const handleMoodSelection = (mood) => {
+        setUserMood(mood);
+    };
+
+    const getVideosForCurrentMood = () => {
+        return moodVideos[userMood] || moodVideos.calm;
     };
 
     const wellnessActivities = [
@@ -352,16 +552,14 @@ const WellnessCenter = ({ user }) => {
         },
         {
             id: 4,
-            name: 'Relaxing Sounds',
-            description: 'Calm your mind with ambient sounds',
-            icon: '🎵',
+            name: 'Mood Videos',
+            description: 'Curated videos for your current mood',
+            icon: '🎬',
             color: '#96ceb4',
-            subOptions: [
-                { name: 'Rain Sounds', action: () => startSoundTherapy('rain') },
-                { name: 'Ocean Waves', action: () => startSoundTherapy('ocean') },
-                { name: 'Forest Sounds', action: () => startSoundTherapy('forest') },
-                { name: 'White Noise', action: () => startSoundTherapy('white') }
-            ]
+            subOptions: getVideosForCurrentMood().slice(0, 3).map(video => ({
+                name: video.title,
+                action: () => startVideoTherapy(video)
+            }))
         },
         {
             id: 5,
@@ -540,30 +738,61 @@ const WellnessCenter = ({ user }) => {
                         Stop Exercise
                     </button>
                 </div>
-            ) : soundActive ? (
-                <div className="active-sound-screen">
-                    <div className="sound-container">
-                        <h3>{currentSound.name}</h3>
-                        <p>{currentSound.description}</p>
-                        <div className="sound-visualization">
-                            <div className="sound-icon">{currentSound.icon}</div>
-                            <div className="sound-waves">
-                                <div className="wave"></div>
-                                <div className="wave"></div>
-                                <div className="wave"></div>
-                            </div>
+            ) : videoActive ? (
+                <div className="active-video-screen">
+                    <div className="video-container">
+                        <h3>{currentVideo.title}</h3>
+                        <p>{currentVideo.description}</p>
+                        <p className="video-mood">🎭 Recommended for: {moodOptions.find(m => m.id === currentVideo.mood)?.name}</p>
+                        
+                        <div className="youtube-embed">
+                            <iframe
+                                width="100%"
+                                height="315"
+                                src={`https://www.youtube.com/embed/${currentVideo.youtubeId}?autoplay=1&rel=0`}
+                                title={currentVideo.title}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                            ></iframe>
                         </div>
-                        <p className="sound-note">🔊 Sound playing... (Demo mode - add actual audio files)</p>
+                        
+                        <div className="video-info">
+                            <div className="video-duration">⏱️ Duration: {currentVideo.duration}</div>
+                            <div className="video-category">📁 Category: {currentVideo.category}</div>
+                        </div>
+                        
                         <button 
                             className="stop-exercise-btn"
                             onClick={stopExercise}
                         >
-                            Stop Sound
+                            Close Video
                         </button>
                     </div>
                 </div>
             ) : (
                 <>
+                    {/* Mood Selection Section */}
+                    <div className="mood-selection-section">
+                        <h3>🎭 How are you feeling?</h3>
+                        <p>Select your current mood to get personalized content</p>
+                        <div className="mood-grid">
+                            {moodOptions.map(mood => (
+                                <button
+                                    key={mood.id}
+                                    className={`mood-btn ${userMood === mood.id ? 'active' : ''}`}
+                                    onClick={() => handleMoodSelection(mood.id)}
+                                >
+                                    <div className="mood-icon">{mood.name.split(' ')[0]}</div>
+                                    <div className="mood-info">
+                                        <div className="mood-name">{mood.name.split(' ').slice(1).join(' ')}</div>
+                                        <div className="mood-desc">{mood.description}</div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="wellness-stats">
                         <div className="stat-card">
                             <div className="stat-icon">😊</div>
@@ -626,6 +855,38 @@ const WellnessCenter = ({ user }) => {
                                 )}
                             </div>
                         ))}
+                    </div>
+
+                    {/* Additional Video Recommendations */}
+                    <div className="video-recommendations">
+                        <h3>🎬 More Videos for {moodOptions.find(m => m.id === userMood)?.name}</h3>
+                        <div className="video-grid">
+                            {getVideosForCurrentMood().map(video => (
+                                <div key={video.id} className="video-card">
+                                    <div className="video-thumbnail">
+                                        <img 
+                                            src={`https://img.youtube.com/vi/${video.youtubeId}/hqdefault.jpg`}
+                                            alt={video.title}
+                                        />
+                                        <div className="play-overlay">▶️</div>
+                                    </div>
+                                    <div className="video-info">
+                                        <h4>{video.title}</h4>
+                                        <p>{video.description}</p>
+                                        <div className="video-meta">
+                                            <span>⏱️ {video.duration}</span>
+                                            <span>📁 {video.category}</span>
+                                        </div>
+                                        <button 
+                                            onClick={() => startVideoTherapy(video)}
+                                            className="watch-btn"
+                                        >
+                                            Watch Now
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="wellness-tips">

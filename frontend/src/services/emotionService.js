@@ -1,3 +1,5 @@
+import * as faceapi from 'face-api.js';
+
 class EmotionService {
     constructor() {
         this.isModelsLoaded = false;
@@ -8,77 +10,64 @@ class EmotionService {
     async loadModels() {
         try {
             console.log('Loading FaceAPI models...');
+            const MODEL_URL = '/models';
             
-            // For demo purposes, we'll simulate model loading
-            // In a real app, you would load actual models from public/models folder
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+            ]);
             
             this.modelsLoaded = true;
             this.isModelsLoaded = true;
-            console.log('FaceAPI models loaded successfully (demo mode)');
+            console.log('FaceAPI models loaded successfully');
             return true;
             
         } catch (error) {
-            console.error('Error loading FaceAPI models (demo mode active):', error);
+            console.error('Error loading FaceAPI models:', error);
             this.loadError = error;
             this.modelsLoaded = false;
             this.isModelsLoaded = false;
-            
-            // Don't break the app - continue in demo mode
             return false;
         }
     }
 
     async detectEmotionsFromImage(imageElement) {
         if (!this.modelsLoaded) {
-            // Return mock emotions for demo
-            return this.getMockEmotions();
+            console.warn("Models not loaded yet. Returning null.");
+            return null;
         }
         
         try {
-            // This would be real face detection in production
-            const detection = await this.realFaceDetection(imageElement);
-            return detection;
+            return await this.realFaceDetection(imageElement);
         } catch (error) {
-            console.error('Face detection error, using mock data:', error);
-            return this.getMockEmotions();
+            console.error('Face detection error:', error);
+            return null;
         }
     }
 
-    getMockEmotions() {
-        // Generate realistic mock emotions
-        const emotions = {
-            happy: Math.random() * 0.4,
-            sad: Math.random() * 0.3,
-            angry: Math.random() * 0.2,
-            fearful: Math.random() * 0.1,
-            surprised: Math.random() * 0.2,
-            neutral: Math.random() * 0.3,
-            disgusted: Math.random() * 0.1
-        };
-
-        // Normalize to sum to 1
-        const total = Object.values(emotions).reduce((sum, value) => sum + value, 0);
-        Object.keys(emotions).forEach(emotion => {
-            emotions[emotion] = emotions[emotion] / total;
-        });
-
-        const dominantEmotion = Object.keys(emotions).reduce((a, b) => 
-            emotions[a] > emotions[b] ? a : b
+    async realFaceDetection(imageElement) {
+        // Run face-api.js detection
+        const detections = await faceapi.detectSingleFace(
+            imageElement, 
+            new faceapi.TinyFaceDetectorOptions()
+        ).withFaceExpressions();
+        
+        if (!detections) return null;
+        
+        const expressions = detections.expressions;
+        
+        // Find dominant emotion
+        const dominantEmotion = Object.keys(expressions).reduce((a, b) => 
+            expressions[a] > expressions[b] ? a : b
         );
-
+        
         return {
-            expressions: emotions,
+            expressions: expressions,
             dominantEmotion: dominantEmotion,
-            confidence: emotions[dominantEmotion],
+            confidence: expressions[dominantEmotion],
             timestamp: new Date().toISOString()
         };
-    }
-
-    async realFaceDetection(imageElement) {
-        // This would contain the actual Face-API.js code
-        // For now, return mock data
-        return this.getMockEmotions();
     }
 
     calculateCrisisLevel(emotionHistory) {
@@ -88,11 +77,11 @@ class EmotionService {
         const negativeEmotions = ['sad', 'angry', 'fearful'];
         
         const negativeCount = recentEmotions.filter(emotion => 
-            negativeEmotions.includes(emotion.dominantEmotion)
+            emotion && emotion.dominantEmotion && negativeEmotions.includes(emotion.dominantEmotion)
         ).length;
 
         const averageIntensity = recentEmotions.reduce((sum, emotion) => 
-            sum + emotion.confidence, 0) / recentEmotions.length;
+            sum + (emotion ? emotion.confidence : 0), 0) / (recentEmotions.length || 1);
 
         if (negativeCount >= 4 && averageIntensity > 0.7) return 'SEVERE';
         if (negativeCount >= 3 && averageIntensity > 0.5) return 'HIGH';

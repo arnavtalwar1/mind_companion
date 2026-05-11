@@ -4,20 +4,34 @@ from flask_cors import CORS
 import json
 from datetime import datetime
 import random
+from database import db
+import uuid
+import os
+import requests
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+from groq import Groq
+
+# Configure Groq
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 
-# Configure CORS properly for all origins and methods
-CORS(app, origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"], 
+# Configure CORS properly for production and local development
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001").split(",")
+CORS(app, origins=allowed_origins, 
      supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 socketio = SocketIO(app, 
-                   cors_allowed_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+                   cors_allowed_origins=allowed_origins,
                    async_mode='threading')
 
-# Store user sessions (in production, use a database)
-user_sessions = {}
+
 
 class SimpleEmotionDetector:
     def detect_from_text(self, text):
@@ -53,6 +67,54 @@ class SimpleEmotionDetector:
 # Initialize detector
 emotion_detector = SimpleEmotionDetector()
 
+# ==========================================
+# 🤖 AI MODEL CONFIGURATION (GROQ)
+# ==========================================
+
+def generate_ai_response(message, emotion, history):
+    if not GROQ_API_KEY:
+        return "Please set your GROQ_API_KEY in the .env file in the backend directory!"
+
+    system_prompt = f"""You are an empathetic, professional AI mental health companion with expertise in clinical screening.
+Current User Emotion: {emotion['emotion']} (confidence: {emotion.get('confidence', 0)}).
+
+YOUR RESPONSIBILITIES:
+1. EMPATHY: Listen actively, validate the user's feelings, and provide a safe space for expression.
+2. SCREENING: If the user asks about their mental state or describes persistent symptoms, perform a gentle diagnostic screening. Look for indicators of:
+   - Major Depressive Disorder (low mood, loss of interest, sleep issues, fatigue).
+   - Generalized Anxiety (excessive worry, restlessness, tension).
+   - Panic Disorder or Social Anxiety.
+   - Stress/Burnout.
+3. STRUCTURED FEEDBACK: When providing a screening summary, use clear, non-judgmental language. Identify "potential indicators" rather than giving a definitive diagnosis.
+4. MANDATORY DISCLAIMER: Every response that discusses potential conditions or screening results MUST end with: 
+   "**IMPORTANT DISCLAIMER**: I am an AI companion, not a licensed medical professional. This screening is for educational and support purposes only. Please consult a psychiatrist or therapist for a formal diagnosis and treatment plan."
+5. CRISIS SAFETY: If any mention of self-harm or suicide occurs, immediately provide crisis resources and encourage professional help.
+
+CONVERSATION STYLE:
+- Keep responses conversational and concise (max 3-4 sentences per turn unless providing a summary).
+- Ask clarifying questions about the duration and severity of symptoms."""
+
+    try:
+        # Build chat history
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            role = "assistant" if msg['sender'] == 'ai' else "user"
+            messages.append({"role": role, "content": msg['message_text']})
+            
+        messages.append({"role": "user", "content": message})
+        
+        # Call Groq API
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+        )
+        
+        return completion.choices[0].message.content
+            
+    except Exception as e:
+        print("Exception during Groq AI call:", str(e))
+        return "I encountered an error trying to process that."
+
 @app.route('/')
 def home():
     return jsonify({
@@ -60,6 +122,97 @@ def home():
         "status": "running",
         "version": "1.0"
     })
+
+@app.route('/api/register', methods=['POST', 'OPTIONS'])
+def register_user():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'success'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
+        
+    try:
+        data = request.get_json()
+        
+        # Check if email exists
+        conn = __import__('sqlite3').connect(db.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE email = ?', (data.get('email'),))
+        existing_user = cursor.fetchone()
+        conn.close()
+        
+        if existing_user:
+            return jsonify({'success': False, 'error': 'Email already registered'}), 400
+            
+        user_id = 'user_' + str(uuid.uuid4())
+        
+        user_data = {
+            'id': user_id,
+            'name': data.get('name'),
+            'email': data.get('email'),
+            'student_id': data.get('studentId'),
+            'age': data.get('age'),
+            'emergency_contact_name': data.get('emergencyContactName'),
+            'emergency_contact_phone': data.get('emergencyContactPhone')
+        }
+        
+        db.add_user(user_data)
+        
+        response = jsonify({
+            'success': True,
+            'user': user_data
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response
+        
+    except Exception as e:
+        error_response = jsonify({'success': False, 'error': str(e)})
+        error_response.headers.add('Access-Control-Allow-Origin', '*')
+        return error_response, 500
+
+@app.route('/api/login', methods=['POST', 'OPTIONS'])
+def login_user():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'success'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
+        
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        # Simple login - just check email
+        conn = __import__('sqlite3').connect(db.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        user = cursor.fetchone()
+        conn.close()
+        
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+            
+        user_data = {
+            'id': user[0],
+            'name': user[1],
+            'email': user[2],
+            'student_id': user[3]
+        }
+        
+        response = jsonify({
+            'success': True,
+            'user': user_data
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response
+        
+    except Exception as e:
+        error_response = jsonify({'success': False, 'error': str(e)})
+        error_response.headers.add('Access-Control-Allow-Origin', '*')
+        return error_response, 500
+
 
 # Handle CORS preflight requests
 @app.route('/api/chat', methods=['OPTIONS'])
@@ -76,49 +229,34 @@ def chat_with_ai():
         data = request.get_json()
         message = data.get('message', '')
         user_id = data.get('user_id', 'anonymous')
+        session_id = data.get('session_id')
         
         if not message:
             return jsonify({'success': False, 'error': 'No message provided'}), 400
+            
+        if session_id and user_id != 'anonymous':
+            db.start_session(user_id, session_id)
         
         # Analyze emotion first
         emotion_result = emotion_detector.detect_from_text(message)
         emotion = emotion_result['emotion']
         
-        # Generate appropriate response based on emotion
-        responses = {
-            'happy': [
-                "That's wonderful to hear! 😊 What's making you feel happy today?",
-                "I'm glad you're feeling good! Would you like to share what brought you joy?",
-                "Happiness is contagious! Tell me more about what's going well for you.",
-                "It's great to hear you're feeling positive! What's been the highlight of your day?"
-            ],
-            'sad': [
-                "I'm sorry you're feeling this way. 💙 It's okay to feel sad sometimes. Would you like to talk about what's bothering you?",
-                "I hear that you're going through a tough time. Remember that these feelings are temporary. Would a breathing exercise help?",
-                "Thank you for sharing how you feel. You're not alone in this. Let's work through it together.",
-                "It takes courage to acknowledge sadness. I'm here to listen whenever you're ready to share."
-            ],
-            'angry': [
-                "I can sense you're feeling frustrated. 🧘 Let's take a moment to breathe together.",
-                "Anger is a natural emotion. Would you like to try some techniques to help calm those feelings?",
-                "I understand you're upset. Let's break this down - what specifically is bothering you?",
-                "It's okay to feel angry. Sometimes talking about it can help process those emotions."
-            ],
-            'anxious': [
-                "Anxiety can feel overwhelming. Let's try a grounding exercise together. 🌿",
-                "I'm here with you. Let's focus on your breathing - in for 4, hold for 4, out for 4.",
-                "It sounds like you're carrying a lot right now. Would you like to try a quick mindfulness exercise?",
-                "Anxiety can make everything feel bigger. Let's take it one step at a time together."
-            ],
-            'neutral': [
-                "Thanks for sharing. How are you really feeling today?",
-                "I'm here to listen. What's on your mind?",
-                "Tell me more about what's going on with you today.",
-                "I appreciate you reaching out. What would you like to talk about?"
-            ]
-        }
+        # Get conversation history from DB for context
+        history = []
+        if session_id and user_id != 'anonymous':
+            conn = __import__('sqlite3').connect(db.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT message_text, sender FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 10', (session_id,))
+            for row in cursor.fetchall():
+                history.append({'message_text': row[0], 'sender': row[1]})
+            conn.close()
+
+        # Generate response using the AI model
+        ai_response = generate_ai_response(message, emotion_result, history)
         
-        ai_response = random.choice(responses.get(emotion, responses['neutral']))
+        if session_id and user_id != 'anonymous':
+            db.add_chat_message(user_id, session_id, message, 'user', emotion_result)
+            db.add_chat_message(user_id, session_id, ai_response, 'ai', None)
         
         # Determine if we should suggest an exercise
         suggest_exercise = emotion in ['sad', 'angry', 'anxious']
@@ -272,12 +410,13 @@ def get_user_session(user_id):
         return response
         
     try:
-        session_data = user_sessions.get(user_id, [])
+        session_data = db.get_user_sessions(user_id)
+        emotion_data = db.get_user_emotions(user_id)
         response = jsonify({
             'success': True,
             'user_id': user_id,
             'session_count': len(session_data),
-            'recent_emotions': session_data[-10:]  # Last 10 entries
+            'recent_emotions': emotion_data[-10:] if emotion_data else []
         })
         response.headers.add('Access-Control-Allow-Origin', '*')
         return response
@@ -318,8 +457,10 @@ def handle_user_message(data):
     })
 
 if __name__ == '__main__':
-    print("🚀 Starting AI Mental Health Companion Server...")
-    print("📍 API running at: http://localhost:5000")
-    print("📡 WebSocket server active")
-    print("🌐 CORS enabled for: http://localhost:3000, http://localhost:3001")
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    # Debug mode should be False in production
+    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
+    
+    print(f"Starting AI Mental Health Companion Server on port {port}...")
+    print("WebSocket server active")
+    socketio.run(app, debug=debug_mode, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)

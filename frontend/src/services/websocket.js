@@ -1,3 +1,5 @@
+import { io } from 'socket.io-client';
+
 class WebSocketService {
     constructor() {
         this.socket = null;
@@ -8,23 +10,39 @@ class WebSocketService {
     }
 
     connect() {
-        try {
-            // For demo purposes, simulate WebSocket connection
-            console.log('WebSocket: Simulating connection (backend not required)');
+        if (this.socket) return;
+        
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const url = API_BASE_URL.replace(/\/api$/, '');
+
+        console.log('Connecting to WebSocket server:', url);
+        this.socket = io(url, {
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: this.maxReconnectAttempts
+        });
+
+        this.socket.on('connect', () => {
             this.isConnected = true;
-            
-            // Simulate successful connection
-            setTimeout(() => {
-                this.emitEvent('connected', { message: 'Connected to Mental Health Companion', status: 'active' });
-            }, 1000);
-            
-        } catch (error) {
-            console.log('WebSocket: Running in demo mode - backend connection not required');
-            this.isConnected = true;
-        }
+            this.reconnectAttempts = 0;
+            console.log('WebSocket connected');
+        });
+
+        this.socket.on('disconnect', () => {
+            this.isConnected = false;
+            console.log('WebSocket disconnected');
+        });
+
+        // Forward backend events to frontend listeners
+        this.socket.on('connected', (data) => this.emitEvent('connected', data));
+        this.socket.on('tracking_started', (data) => this.emitEvent('tracking_started', data));
+        this.socket.on('ai_response', (data) => this.emitEvent('ai_response', data));
     }
 
     disconnect() {
+        if (this.socket) {
+            this.socket.disconnect();
+            this.socket = null;
+        }
         this.isConnected = false;
         this.reconnectAttempts = 0;
         console.log('WebSocket disconnected');
@@ -60,23 +78,17 @@ class WebSocketService {
         }
     }
 
-    // Emit events to server (simulated for demo)
+    // Emit events to server
     emit(event, data) {
         console.log(`WebSocket: Emitting ${event}`, data);
-        
-        // Simulate server responses for demo
-        if (event === 'start_emotion_tracking') {
-            setTimeout(() => {
-                this.emitEvent('tracking_started', { 
-                    user_id: data.userId, 
-                    status: 'active',
-                    message: 'Real-time emotion tracking started'
-                });
-            }, 500);
+        if (this.socket && this.isConnected) {
+            this.socket.emit(event, data);
+        } else {
+            console.warn('Cannot emit, socket not connected');
         }
     }
 
-    // Demo method to simulate real-time emotion updates
+    // Demo method to simulate real-time emotion updates (can be replaced by real FaceAPI logic later)
     startDemoEmotionStream(userId, callback) {
         console.log('Starting demo emotion stream for user:', userId);
         
